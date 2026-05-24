@@ -8,6 +8,7 @@ import { GameCard } from '../components/GameCard';
 import { CalledNumbersBar } from '../components/CalledNumbersBar';
 import { KinhButton } from '../components/KinhButton';
 import { GameEndedModal } from '../components/GameEndedModal';
+import { RadioWidget } from '../components/RadioWidget';
 
 interface ActiveQuestion {
   question: QuestionDto;
@@ -693,6 +694,9 @@ export function GamePage() {
           }}
         />
       )}
+
+      {/* Radio widget — chỉ host thấy */}
+      {isHost && <RadioWidget />}
     </div>
   );
 }
