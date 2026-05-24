@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"D:\\\\SCHOOL\\\\Sem9\\\\MLN131\\\\MLN131_BE\\\\Loto_FE\" -Force)",
+      "Bash(Select-Object Mode, Name)",
+      "Read(//d/SCHOOL/Sem9/MLN131/MLN131_BE/Loto_BE/**)"
+    ]
+  }
+}
