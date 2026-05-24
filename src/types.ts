@@ -1,6 +1,6 @@
 // Enums
 export type RoomState = 'Lobby' | 'Picking' | 'Playing' | 'Ended';
-export type GamePhase = 'Idle' | 'DrawerSelecting' | 'DrawerAnswering' | 'Stealing' | 'Revealing';
+export type GamePhase = 'Idle' | 'DrawerAnswering' | 'Stealing' | 'Revealing';
 export type WinType = 'Row' | 'Column';
 
 // Room
@@ -36,17 +36,21 @@ export interface GameStateDto {
   roomCode: string;
   phase: GamePhase;
   currentDrawerId: string | null;
-  currentSlotId: string | null;        // Guid, không phải số
-  deadline: string | null;              // ← KHÔNG phải phaseDeadline
+  currentSlotId: string | null;
+  deadline: string | null;
   calledNumbers: number[];
   remainingSlots: number;
   lockedSlots: number;
-  answeredPositions: number[];          // ← KHÔNG phải answeredSlotNumbers
-  lockedPositions: number[];            // ← KHÔNG phải lockedSlotNumbers
+  answeredPositions: number[];
+  lockedPositions: number[];
+  currentSpunNumber: number | null;
 }
 
-export interface DrawerPickRequest { playerId: string; position: number }
-export interface DrawerPickResponse { question: QuestionDto; assignedNumber: number; deadline: string }
+export interface SpinWheelRequest { hostId: string }
+export interface SpinWheelResponse {
+  spunNumber: number; question: QuestionDto;
+  firstAnswererId: string; deadline: string;
+}
 
 export interface SubmitAnswerRequest { playerId: string; answerIndex: number }
 export interface SubmitAnswerResponse {

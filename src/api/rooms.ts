@@ -2,7 +2,7 @@ import { api } from './client';
 import type {
   CreateRoomRequest, CreateRoomResponse,
   JoinRoomRequest, JoinRoomResponse,
-  RoomDto, PlayerDto, CardDto, GameStateDto, KinhVerifyResult,
+  RoomDto, PlayerDto, CardDto, GameStateDto, KinhVerifyResult, SpinWheelResponse,
 } from '../types';
 
 export const roomsApi = {
@@ -37,20 +37,14 @@ export const roomsApi = {
       `/Rooms/${code}/game/start`, null, { params: { initiatorId } }
     ).then(r => r.data),
 
-  nextDrawer: (code: string) =>
-    api.post<GameStateDto>(`/Rooms/${code}/game/next-drawer`).then(r => r.data),
-
-  pickSlot: (code: string, playerId: string, position: number) =>
-    api.post(`/Rooms/${code}/game/pick-slot`, { playerId, position }).then(r => r.data),
+  spinWheel: (code: string, hostId: string) =>
+    api.post<SpinWheelResponse>(`/Rooms/${code}/game/spin-wheel`, { hostId }).then(r => r.data),
 
   submitAnswer: (code: string, playerId: string, answerIndex: number) =>
     api.post(`/Rooms/${code}/game/submit-answer`, { playerId, answerIndex }).then(r => r.data),
 
   stealAttempt: (code: string, playerId: string, answerIndex: number) =>
     api.post(`/Rooms/${code}/game/steal`, { playerId, answerIndex }).then(r => r.data),
-
-  markNumber: (code: string, playerId: string, number: number) =>
-    api.post(`/Rooms/${code}/game/mark`, { playerId, number }).then(r => r.data),
 
   claimKinh: (code: string, playerId: string) =>
     api.post<KinhVerifyResult>(`/Rooms/${code}/game/claim-kinh`, { playerId }).then(r => r.data),
@@ -59,5 +53,5 @@ export const roomsApi = {
     api.delete(`/Rooms/${code}/cards/pick`, { params: { playerId } }).then(r => r.data),
 
   getAllCards: (code: string) =>
-  api.get<CardDto[]>(`/Rooms/${code}/cards`).then(r => r.data),
+    api.get<CardDto[]>(`/Rooms/${code}/cards`).then(r => r.data),
 };

@@ -5,10 +5,9 @@ interface Props {
   card: CardDto;
   marked: Set<number>;
   called: Set<number>;
-  onMark: (n: number) => void;
 }
 
-export function GameCard({ card, marked, called, onMark }: Props) {
+export function GameCard({ card, marked, called }: Props) {
   const theme = getCardTheme(card.id);
   return (
     <div className={`${theme.bg} ${theme.border} border-2 rounded-xl p-4`}>
@@ -16,27 +15,31 @@ export function GameCard({ card, marked, called, onMark }: Props) {
         <span className="text-4xl">{theme.emoji}</span>
         <span className="font-mono text-sm font-bold text-gray-700">{theme.label}</span>
       </div>
-      <div className="grid grid-cols-5 gap-1.5">
+      <div className="grid grid-cols-4 gap-2">
         {card.grid.flat().map((n, i) => {
-          const isCalled = called.has(n);
+          if (n === 0) {
+            return (
+              <div key={i}
+                className="aspect-square rounded-lg bg-gray-100 border border-dashed border-gray-300" />
+            );
+          }
           const isMarked = marked.has(n);
+          const isCalled = called.has(n);
           const cls = isMarked
-            ? 'bg-red-500 text-white shadow-md scale-105'
+            ? 'bg-green-500 text-white shadow-md scale-105'
             : isCalled
-              ? 'bg-yellow-200 text-gray-800 ring-2 ring-yellow-400 animate-pulse'
+              ? 'bg-gray-200 text-gray-400 line-through'
               : 'bg-white text-gray-800';
           return (
-            <button key={i}
-              onClick={() => isCalled && !isMarked && onMark(n)}
-              disabled={!isCalled || isMarked}
-              className={`aspect-square flex items-center justify-center rounded-lg font-bold text-lg transition ${cls} ${isCalled && !isMarked ? 'cursor-pointer hover:scale-110' : 'cursor-default'}`}>
+            <div key={i}
+              className={`aspect-square flex items-center justify-center rounded-lg font-bold text-lg transition select-none ${cls}`}>
               {n}
-            </button>
+            </div>
           );
         })}
       </div>
       <p className="mt-2 text-xs text-gray-500 text-center">
-        🟡 Số đã gọi (click để mark) · 🔴 Đã mark
+        🟢 Đã thắng · ─ Số đã qua · ⬜ Chưa gọi
       </p>
     </div>
   );
