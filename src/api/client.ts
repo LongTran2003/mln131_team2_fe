@@ -6,12 +6,16 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-// Centralized error log
 api.interceptors.response.use(
   (res) => res,
   (err) => {
-    const msg = err.response?.data?.error || err.message;
-    console.error('[API Error]', msg);
+    if (!err.response) {
+      // Lỗi mạng — không log console để tránh spam khi mạng không ổn định
+      return Promise.reject(new Error('Mất kết nối, đang thử lại...'));
+    }
+    const msg = err.response.data?.error
+      || err.response.data?.message
+      || `Lỗi máy chủ (${err.response.status})`;
     return Promise.reject(new Error(msg));
   }
 );

@@ -20,10 +20,29 @@ interface ActiveQuestion {
   isStealMode: boolean;
 }
 
+function ErrorBanner({ message, onClose }: { message: string; onClose: () => void }) {
+  const isNetwork = message.includes('kết nối') || message.includes('thử lại');
+  useEffect(() => {
+    if (!isNetwork) return;
+    const t = setTimeout(onClose, 4000);
+    return () => clearTimeout(t);
+  }, [message, isNetwork, onClose]);
+  return (
+    <div className={`p-3 rounded text-sm flex justify-between items-center ${
+      isNetwork ? 'bg-yellow-50 border border-yellow-200 text-yellow-800'
+                : 'bg-red-50 border border-red-200 text-red-800'
+    }`}>
+      <span>{isNetwork ? '⚠️' : '✗'} {message}</span>
+      <button onClick={onClose} className="ml-3 font-bold opacity-60 hover:opacity-100">×</button>
+    </div>
+  );
+}
+
 export function GamePage() {
   const { code } = useParams<{ code: string }>();
   const navigate = useNavigate();
-  const session = storage.load();
+  // useState để session stable qua các render — tránh loadInitial bị gọi lại liên tục
+  const [session] = useState(() => storage.load());
 
   useEffect(() => {
     if (!session || !code || session.roomCode !== code) {
@@ -65,13 +84,16 @@ export function GamePage() {
   }, [session?.cardId, session?.cardGrid, session?.playerId, myCard]);
 
   // ===== Load =====
+  const refetchingRef = useRef(false);
   const refetchState = useCallback(async () => {
-    if (!code) return;
+    if (!code || refetchingRef.current) return;
+    refetchingRef.current = true;
     try {
       const state = await roomsApi.getGameState(code);
       setGameState(state);
       setCalledNumbers(new Set(state.calledNumbers));
-    } catch { /* silent */ }
+    } catch { /* silent — lỗi mạng thoáng qua, SignalR tự reconnect */ }
+    finally { refetchingRef.current = false; }
   }, [code]);
 
   const loadInitial = useCallback(async () => {
@@ -95,7 +117,8 @@ export function GamePage() {
         } catch { /* getAllCards optional */ }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Load thất bại');
+      const msg = e instanceof Error ? e.message : '';
+      setError(msg.includes('kết nối') ? msg : 'Không thể tải dữ liệu — vui lòng tải lại trang');
     }
   }, [code, session]);
 
@@ -225,7 +248,7 @@ export function GamePage() {
     try {
       await roomsApi.pickSlot(code, session.playerId, position);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Pick slot thất bại');
+      setError(e instanceof Error ? e.message : 'Không thể chọn câu hỏi, thử lại');
       refetchState();
     } finally {
       setPicking(false);
@@ -243,7 +266,7 @@ export function GamePage() {
       }
     } catch (e) {
       setHasAnswered(false);
-      setError(e instanceof Error ? e.message : 'Trả lời thất bại');
+      setError(e instanceof Error ? e.message : 'Không thể gửi câu trả lời, thử lại');
       refetchState();
     }
   };
@@ -256,7 +279,7 @@ export function GamePage() {
         setError(res.reason ?? 'Kinh không hợp lệ');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Claim Kinh thất bại');
+      setError(e instanceof Error ? e.message : 'Không thể kêu KINH, thử lại');
       refetchState();
     }
   };
@@ -267,7 +290,7 @@ export function GamePage() {
     try {
       await roomsApi.nextDrawer(code);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Next turn thất bại');
+      setError(e instanceof Error ? e.message : 'Không thể chuyển lượt');
     }
   };
 
@@ -351,10 +374,7 @@ export function GamePage() {
         </div>
 
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded text-sm text-red-800 flex justify-between">
-            <span>✗ {error}</span>
-            <button onClick={() => setError(null)} className="text-red-500 font-bold">×</button>
-          </div>
+          <ErrorBanner message={error} onClose={() => setError(null)} />
         )}
 
         {toast && (
