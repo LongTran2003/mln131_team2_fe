@@ -2,21 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { roomsApi } from '../api/rooms';
 import { useSignalR } from '../hooks/useSignalR';
-import { useCountdown } from '../hooks/useCountdown';
 import { storage } from '../utils/storage';
 import type { GameStateDto, CardDto, PlayerDto, QuestionDto } from '../types';
 import { GameCard } from '../components/GameCard';
 import { CalledNumbersBar } from '../components/CalledNumbersBar';
-import { QuestionPanel } from '../components/QuestionPanel';
 import { KinhButton } from '../components/KinhButton';
 import { GameEndedModal } from '../components/GameEndedModal';
 
 interface ActiveQuestion {
   question: QuestionDto;
   spunNumber: number;
-  drawerId: string;
-  deadline: string;
-  isStealMode: boolean;
 }
 
 function ErrorBanner({ message, onClose }: { message: string; onClose: () => void }) {
@@ -36,6 +31,8 @@ function ErrorBanner({ message, onClose }: { message: string; onClose: () => voi
     </div>
   );
 }
+
+const ANSWER_LABELS = ['A', 'B', 'C', 'D'];
 
 export function GamePage() {
   const { code } = useParams<{ code: string }>();
@@ -59,7 +56,9 @@ export function GamePage() {
   const [isSpinning, setIsSpinning] = useState(false);
   const [wheelDisplay, setWheelDisplay] = useState<number | null>(null);
   const [myTurnPopup, setMyTurnPopup] = useState(false);
-  const [wrongAnswerPopup, setWrongAnswerPopup] = useState(false);
+  const [answerResultPopup, setAnswerResultPopup] = useState<{
+    playerName: string; isMe: boolean; isCorrect: boolean;
+  } | null>(null);
   const [winnerInfo, setWinnerInfo] = useState<{ name: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -67,17 +66,11 @@ export function GamePage() {
   const playersRef = useRef<PlayerDto[]>([]);
   useEffect(() => { playersRef.current = players; }, [players]);
 
-  const remaining = useCountdown(
-    activeQuestion?.deadline ?? gameState?.deadline ?? null
-  );
-
-  // Derive markedNumbers from players list (auto-mark is server-side)
   const markedNumbers = useMemo(
     () => new Set(players.find(p => p.id === session?.playerId)?.markedNumbers ?? []),
     [players, session?.playerId]
   );
 
-  // Wheel cycling effect: trong khi spinning, hiển thị số ngẫu nhiên 80ms/lần
   useEffect(() => {
     if (!isSpinning) { setWheelDisplay(null); return; }
     const id = setInterval(() => {
@@ -122,7 +115,6 @@ export function GamePage() {
       setGameState(state);
       setCalledNumbers(new Set(state.calledNumbers));
       setPlayers(playersList);
-
       if (session.isHost) {
         try { setAllCards(await roomsApi.getAllCards(code)); } catch { }
       }
@@ -152,30 +144,26 @@ export function GamePage() {
   }, []);
 
   const handlers = useMemo(() => ({
-    WheelSpun: (data: {
-      spunNumber: number; question: QuestionDto;
-      firstAnswererId: string; deadline: string;
-    }) => {
-      setActiveQuestion({
-        question: data.question,
-        spunNumber: data.spunNumber,
-        drawerId: data.firstAnswererId,
-        deadline: data.deadline,
-        isStealMode: false,
-      });
+    WheelSpun: (data: { spunNumber: number; question: QuestionDto }) => {
+      setActiveQuestion({ question: data.question, spunNumber: data.spunNumber });
       setHasAnswered(false);
       setGameState(prev => prev && ({
         ...prev, phase: 'DrawerAnswering',
-        currentDrawerId: data.firstAnswererId,
-        deadline: data.deadline,
+        currentDrawerId: null, deadline: null,
         currentSpunNumber: data.spunNumber,
       }));
-      if (session && data.firstAnswererId === session.playerId) {
+      showToast(`🎰 Số ${data.spunNumber}`);
+    },
+
+    AnswererSelected: (data: { drawerId: string }) => {
+      setHasAnswered(false);
+      setGameState(prev => prev && ({ ...prev, currentDrawerId: data.drawerId }));
+      if (session && data.drawerId === session.playerId) {
         setMyTurnPopup(true);
         setTimeout(() => setMyTurnPopup(false), 2000);
       }
-      const name = playersRef.current.find(p => p.id === data.firstAnswererId)?.name ?? '...';
-      showToast(`🎰 Số ${data.spunNumber} — ${name} trả lời!`);
+      const name = playersRef.current.find(p => p.id === data.drawerId)?.name ?? '...';
+      showToast(`🎯 ${name} sẽ trả lời`);
     },
 
     ReadyToSpin: () => {
@@ -189,12 +177,21 @@ export function GamePage() {
     },
 
     AnswerSubmitted: (data: { playerId: string; isCorrect: boolean }) => {
-      if (session && data.playerId === session.playerId && !data.isCorrect) {
-        setWrongAnswerPopup(true);
-        setTimeout(() => setWrongAnswerPopup(false), 2000);
+      const name = playersRef.current.find(p => p.id === data.playerId)?.name ?? '?';
+      const isMyAnswer = session?.playerId === data.playerId;
+      const shouldSeePopup = (session?.isHost ?? false) || isMyAnswer;
+
+      if (shouldSeePopup) {
+        setAnswerResultPopup({ playerName: name, isMe: isMyAnswer, isCorrect: data.isCorrect });
+        setTimeout(() => setAnswerResultPopup(null), 2000);
       } else {
-        const name = playersRef.current.find(p => p.id === data.playerId)?.name ?? '?';
-        showToast(`${name} trả lời ${data.isCorrect ? '✅ đúng' : '❌ sai'}`);
+        showToast(`${name} ${data.isCorrect ? '✅ đúng' : '❌ sai'}`);
+      }
+
+      // Sai → clear drawer, host chọn người khác
+      if (!data.isCorrect) {
+        setGameState(prev => prev && ({ ...prev, currentDrawerId: null, deadline: null }));
+        setHasAnswered(false);
       }
     },
 
@@ -202,7 +199,6 @@ export function GamePage() {
       setCalledNumbers(prev => new Set(prev).add(data.number));
       setLatestCalled(data.number);
       setTimeout(() => setLatestCalled(null), 3000);
-      // Optimistic update + server sync
       setPlayers(prev => prev.map(p =>
         p.id === data.byPlayer
           ? { ...p, markedNumbers: [...(p.markedNumbers ?? []), data.number] }
@@ -212,22 +208,9 @@ export function GamePage() {
       refetchState();
     },
 
-    StealModeStarted: ({ deadline }: { deadline: string }) => {
-      setActiveQuestion(prev => prev ? { ...prev, isStealMode: true, deadline } : prev);
-      setHasAnswered(false);
-      setGameState(prev => prev && ({ ...prev, phase: 'Stealing', deadline }));
-      showToast('⚡ Giành quyền trả lời!');
-    },
-
-    StealResolved: (data: { winnerId: string | null; calledNumber: number | null; slotLocked: boolean }) => {
+    SlotSkipped: (data: { number: number }) => {
       setActiveQuestion(null);
-      if (data.winnerId) {
-        const name = playersRef.current.find(p => p.id === data.winnerId)?.name ?? '?';
-        showToast(`🏆 ${name} đã giành được!`);
-      } else if (data.slotLocked) {
-        showToast('Hết giờ — slot bị khóa');
-      }
-      refetchPlayers();
+      showToast(`⏭ Bỏ qua số ${data.number}`);
       refetchState();
     },
 
@@ -258,7 +241,6 @@ export function GamePage() {
     if (!session || !code || isSpinning) return;
     setIsSpinning(true);
     try {
-      // Min 1.5s để vòng quay có cảm giác thật (như sổ số kiến thiết)
       await Promise.all([
         roomsApi.spinWheel(code, session.playerId),
         new Promise(r => setTimeout(r, 1500)),
@@ -270,18 +252,38 @@ export function GamePage() {
     }
   };
 
+  const handleSelectAnswerer = async (playerId: string) => {
+    if (!session || !code) return;
+    try {
+      await roomsApi.selectAnswerer(code, session.playerId, playerId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không thể chọn người trả lời');
+    }
+  };
+
   const handleAnswer = async (answerIndex: number) => {
     if (!session || !code || !activeQuestion || hasAnswered) return;
+    const drawerId = gameState?.currentDrawerId;
+    if (!drawerId) {
+      setError('Chọn người trả lời trước khi đánh dấu đáp án');
+      return;
+    }
     setHasAnswered(true);
     try {
-      if (activeQuestion.isStealMode) {
-        await roomsApi.stealAttempt(code, session.playerId, answerIndex);
-      } else {
-        await roomsApi.submitAnswer(code, session.playerId, answerIndex);
-      }
+      await roomsApi.submitAnswer(code, drawerId, answerIndex);
     } catch (e) {
       setHasAnswered(false);
       setError(e instanceof Error ? e.message : 'Không thể gửi câu trả lời, thử lại');
+    }
+  };
+
+  const handleSkipSlot = async () => {
+    if (!session || !code) return;
+    if (!confirm('Bỏ qua câu này? Slot sẽ bị khóa.')) return;
+    try {
+      await roomsApi.skipSlot(code, session.playerId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Không thể bỏ qua, thử lại');
     }
   };
 
@@ -299,8 +301,8 @@ export function GamePage() {
 
   const isHost = session.isHost;
   const phase = gameState?.phase ?? 'Idle';
-  const isMyTurn = gameState?.currentDrawerId === session.playerId;
-  const currentDrawer = players.find(p => p.id === gameState?.currentDrawerId);
+  const currentDrawerId = gameState?.currentDrawerId;
+  const currentDrawer = players.find(p => p.id === currentDrawerId);
   const cardById = new Map(allCards.map(c => [c.id, c]));
   const spunNumber = gameState?.currentSpunNumber;
   const gamers = players.filter(p => !p.isHost);
@@ -316,16 +318,11 @@ export function GamePage() {
 
   const phaseLabel = ({
     Idle: '🎯 Sẵn sàng quay số',
-    DrawerAnswering: `${currentDrawer?.name ?? '...'} đang trả lời`,
-    Stealing: '⚡ GIÀNH QUYỀN TRẢ LỜI',
+    DrawerAnswering: currentDrawer
+      ? `${currentDrawer.name} đang trả lời`
+      : '⏳ Host chọn người trả lời',
     Revealing: '✅ Đang xét kết quả...',
   } as const)[phase] ?? phase;
-
-  let qMode: 'drawer' | 'steal' | 'readonly' = 'readonly';
-  if (activeQuestion && !isHost) {
-    if (!activeQuestion.isStealMode && isMyTurn) qMode = 'drawer';
-    else if (activeQuestion.isStealMode && gameState?.currentDrawerId !== session.playerId) qMode = 'steal';
-  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 to-yellow-50 p-3 relative overflow-hidden">
@@ -336,20 +333,29 @@ export function GamePage() {
         <div className="text-[2vw] font-bold text-yellow-600 tracking-widest mt-1">1986 – 2026</div>
       </div>
 
-      {/* "Đến lượt bạn" full-screen popup */}
+      {/* "Đến lượt bạn" popup */}
       {myTurnPopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none bg-black/20">
-          <div className="bg-red-500 text-white text-4xl font-black px-10 py-6 rounded-2xl shadow-2xl animate-bounce">
-            🎯 Đến lượt bạn!
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none bg-black/30">
+          <div className="bg-red-500 text-white font-black px-12 py-8 rounded-2xl shadow-2xl animate-bounce border-4 border-white text-center">
+            <div className="text-6xl mb-2">🎯</div>
+            <div className="text-4xl">Đến lượt bạn!</div>
+            <div className="text-base font-normal mt-2 opacity-90">Đọc đáp án cho quản trò</div>
           </div>
         </div>
       )}
 
-      {/* "Bạn đã trả lời sai" full-screen popup */}
-      {wrongAnswerPopup && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none bg-black/30">
-          <div className="bg-gray-800 text-white text-4xl font-black px-10 py-6 rounded-2xl shadow-2xl animate-bounce border-4 border-red-500">
-            ❌ Bạn đã trả lời sai!
+      {/* Đúng/Sai popup (cho host + người trả lời) */}
+      {answerResultPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none bg-black/40">
+          <div className={`${
+            answerResultPopup.isCorrect ? 'bg-green-500' : 'bg-red-600'
+          } text-white font-black px-12 py-8 rounded-2xl shadow-2xl animate-bounce border-4 border-white text-center`}>
+            <div className="text-6xl mb-2">{answerResultPopup.isCorrect ? '✅' : '❌'}</div>
+            <div className="text-3xl">
+              {answerResultPopup.isMe
+                ? (answerResultPopup.isCorrect ? 'Bạn trả lời đúng!' : 'Bạn trả lời sai!')
+                : `${answerResultPopup.playerName} ${answerResultPopup.isCorrect ? 'trả lời đúng' : 'trả lời sai'}`}
+            </div>
           </div>
         </div>
       )}
@@ -370,8 +376,9 @@ export function GamePage() {
               </div>
             </div>
             <div className={`px-4 py-2 rounded-lg font-bold text-center text-sm ${
-              phase === 'Stealing' ? 'bg-orange-500 text-white animate-pulse' :
-              isMyTurn ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-700'
+              phase === 'DrawerAnswering' && currentDrawerId ? 'bg-red-500 text-white' :
+              phase === 'DrawerAnswering' ? 'bg-orange-400 text-white animate-pulse' :
+              'bg-gray-100 text-gray-700'
             }`}>{phaseLabel}</div>
             <div className="text-xs text-gray-500">
               <strong>{gameState?.answeredPositions.length ?? 0}</strong> đáp ·&nbsp;
@@ -382,7 +389,7 @@ export function GamePage() {
           <div className="flex items-center gap-2 flex-wrap pt-2 border-t">
             <span className="text-xs text-gray-500">Bảng xếp hạng:</span>
             {sortedGamers.map(p => {
-              const isDrawer = p.id === gameState?.currentDrawerId;
+              const isDrawer = p.id === currentDrawerId;
               const isMe = p.id === session.playerId;
               const isLeader = leaderIds.has(p.id);
               const marks = p.markedNumbers?.length ?? 0;
@@ -416,21 +423,27 @@ export function GamePage() {
         {/* HOST VIEW */}
         {isHost && (
           <div className="flex gap-3 items-start">
-            {/* Left: player progress sorted by marks */}
+            {/* Left: Progress sidebar */}
             <div className="w-44 shrink-0 bg-white rounded-xl shadow p-3 space-y-2">
               <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wide">Tiến độ</h3>
               {sortedGamers.map((p, idx) => {
                 const marks = p.markedNumbers?.length ?? 0;
-                const isDrawer = p.id === gameState?.currentDrawerId;
+                const isDrawer = p.id === currentDrawerId;
                 const isLeader = leaderIds.has(p.id);
+                const canSelect = phase === 'DrawerAnswering' && !!activeQuestion;
                 return (
-                  <div key={p.id} className={`p-2 rounded-lg transition ${
-                    isDrawer
-                      ? 'bg-red-100 border-2 border-red-500 shadow-lg shadow-red-200 animate-pulse'
-                      : isLeader
-                        ? 'bg-yellow-50 border-2 border-yellow-400'
-                        : 'bg-gray-50'
-                  }`}>
+                  <button
+                    key={p.id}
+                    onClick={() => canSelect && handleSelectAnswerer(p.id)}
+                    disabled={!canSelect}
+                    className={`w-full text-left p-2 rounded-lg transition ${
+                      isDrawer
+                        ? 'bg-red-100 border-2 border-red-500 shadow-lg shadow-red-200 animate-pulse'
+                        : isLeader
+                          ? 'bg-yellow-50 border-2 border-yellow-400'
+                          : 'bg-gray-50 border-2 border-transparent'
+                    } ${canSelect && !isDrawer ? 'hover:bg-red-50 hover:border-red-300 cursor-pointer' : 'cursor-default'}`}
+                  >
                     <div className="flex justify-between items-center mb-1 gap-1">
                       <span className="text-xs font-bold text-gray-400">#{idx + 1}</span>
                       <span className="text-xs font-semibold truncate flex-1">{p.name}</span>
@@ -443,19 +456,23 @@ export function GamePage() {
                         isLeader ? 'bg-yellow-500' : 'bg-red-500'
                       }`} style={{ width: `${Math.min((marks / 12) * 100, 100)}%` }} />
                     </div>
-                  </div>
+                  </button>
                 );
               })}
+              {phase === 'DrawerAnswering' && activeQuestion && (
+                <div className="text-[10px] text-gray-500 italic text-center pt-1 border-t">
+                  Click người chơi để chọn
+                </div>
+              )}
             </div>
 
-            {/* Center/right: spin wheel + question + mini cards */}
+            {/* Center: Wheel + Question + Skip */}
             <div className="flex-1 space-y-3">
-              {/* Spinning wheel — luôn hiển thị */}
+              {/* Wheel */}
               <div className="bg-white rounded-xl shadow p-6 flex flex-col items-center gap-4">
                 <div className="text-xs text-gray-500 uppercase tracking-wider font-bold">
                   {phase === 'Idle' ? '🎰 Vòng quay số' : 'Số vừa quay'}
                 </div>
-
                 <div className="relative w-56 h-56 flex items-center justify-center">
                   <div
                     className={`absolute inset-0 rounded-full shadow-2xl ${isSpinning ? 'animate-spin' : ''}`}
@@ -471,7 +488,6 @@ export function GamePage() {
                       {isSpinning ? (wheelDisplay ?? '?') : (spunNumber ?? '?')}
                     </div>
                   </div>
-                  {/* Pointer mũi tên ở trên */}
                   <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[12px] border-r-[12px] border-t-[18px] border-l-transparent border-r-transparent border-t-red-700 drop-shadow-lg z-10" />
                 </div>
 
@@ -485,37 +501,71 @@ export function GamePage() {
                   </button>
                 )}
 
-                {phase !== 'Idle' && (
-                  <div className="text-center">
-                    <div className="text-sm font-bold text-gray-700">
-                      {phase === 'DrawerAnswering' && `${currentDrawer?.name ?? '...'} đang trả lời`}
-                      {phase === 'Stealing' && '⚡ Giành quyền trả lời!'}
-                      {phase === 'Revealing' && '✅ Đang xét kết quả...'}
-                    </div>
-                    {remaining > 0 && (phase === 'DrawerAnswering' || phase === 'Stealing') && (
-                      <div className={`text-3xl font-black ${remaining <= 5 ? 'text-red-500 animate-pulse' : 'text-gray-400'}`}>
-                        {remaining}s
-                      </div>
-                    )}
-                  </div>
-                )}
-
                 <p className="text-xs text-gray-500">
                   {gameState?.remainingSlots ?? 40} số còn trong vòng quay
                 </p>
               </div>
 
-              {activeQuestion && (
-                <QuestionPanel
-                  question={activeQuestion.question}
-                  remaining={remaining}
-                  onAnswer={() => {}}
-                  disabled={true}
-                  mode="readonly"
-                />
+              {/* Question + answer buttons cho host (chỉ host thấy) */}
+              {activeQuestion && phase === 'DrawerAnswering' && (
+                <div className="bg-white rounded-xl shadow-lg p-6 border-2 border-red-200">
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="bg-red-100 text-red-700 text-xs px-2 py-1 rounded font-semibold">
+                        Số {activeQuestion.spunNumber}
+                      </span>
+                      <span className="bg-yellow-100 text-yellow-800 text-xs px-2 py-1 rounded font-semibold">
+                        🎙 Chỉ quản trò thấy
+                      </span>
+                      {activeQuestion.question.type === 'Redemption' && (
+                        <span className="bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded font-semibold">
+                          Cứu trợ
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={handleSkipSlot}
+                      className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 rounded font-semibold"
+                    >
+                      ⏭ Bỏ qua
+                    </button>
+                  </div>
+
+                  <p className="text-lg font-semibold mb-4 leading-relaxed">{activeQuestion.question.text}</p>
+
+                  {!currentDrawerId && (
+                    <div className="mb-3 p-2 bg-orange-50 border border-orange-200 rounded text-sm text-orange-800 text-center font-medium">
+                      👆 Chọn người trả lời ở danh sách bên trái trước
+                    </div>
+                  )}
+                  {currentDrawer && (
+                    <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-800 text-center font-medium">
+                      🎯 <strong>{currentDrawer.name}</strong> đang trả lời — click đáp án bạn ấy nói
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {activeQuestion.question.options.map((opt, i) => {
+                      const canClick = !!currentDrawerId && !hasAnswered;
+                      return (
+                        <button key={i}
+                          onClick={() => canClick && handleAnswer(i)}
+                          disabled={!canClick}
+                          className={`text-left p-3 rounded-lg border-2 transition ${
+                            canClick
+                              ? 'border-gray-200 hover:border-red-400 hover:bg-red-50 cursor-pointer'
+                              : 'border-gray-100 bg-gray-50 cursor-not-allowed opacity-60'
+                          }`}>
+                          <span className="font-bold text-red-500 mr-2">{ANSWER_LABELS[i]}.</span>
+                          {opt}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               )}
 
-              {/* Mini cards */}
+              {/* Mini cards (live progress của tất cả player) */}
               <div className="bg-white rounded-xl shadow p-4">
                 <h3 className="font-bold text-sm mb-3">📺 {gamers.length} người chơi</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
@@ -524,7 +574,7 @@ export function GamePage() {
                     const marks = new Set(p.markedNumbers ?? []);
                     return (
                       <div key={p.id} className={`border-2 rounded-lg p-2 ${
-                        p.id === gameState?.currentDrawerId ? 'border-red-400 bg-red-50' : 'border-gray-200'
+                        p.id === currentDrawerId ? 'border-red-400 bg-red-50' : 'border-gray-200'
                       }`}>
                         <div className="flex items-center gap-1 mb-1">
                           <span className={`w-2 h-2 rounded-full ${p.online ? 'bg-green-500' : 'bg-gray-300'}`} />
@@ -557,10 +607,9 @@ export function GamePage() {
           </div>
         )}
 
-        {/* PLAYER VIEW */}
+        {/* PLAYER VIEW (không thấy câu hỏi) */}
         {!isHost && (
           <div className="flex gap-3 items-start">
-            {/* Left: called numbers */}
             <div className="w-36 shrink-0">
               <CalledNumbersBar
                 called={Array.from(calledNumbers).sort((a, b) => a - b)}
@@ -569,47 +618,45 @@ export function GamePage() {
               />
             </div>
 
-            {/* Right: question + card + KINH */}
             <div className="flex-1 min-w-0 space-y-3">
-              {/* Spun number for player */}
-              {spunNumber && phase !== 'Idle' && (
-                <div className="bg-white rounded-xl shadow px-4 py-3 flex items-center gap-3">
-                  <div className="w-12 h-12 bg-red-500 text-white rounded-lg flex items-center justify-center font-black text-2xl">
-                    {spunNumber}
+              {/* Status panel */}
+              <div className="bg-white rounded-xl shadow p-4">
+                {phase === 'Idle' && (
+                  <div className="text-center text-gray-500">
+                    <div className="text-3xl mb-2">⏳</div>
+                    <p className="font-medium">Đợi quản trò quay số...</p>
                   </div>
-                  <div>
-                    <div className="text-xs text-gray-500">Số vừa quay</div>
-                    <div className="text-sm font-bold text-gray-700">
-                      {phase === 'DrawerAnswering' && !isMyTurn && `Đợi ${currentDrawer?.name ?? '...'} trả lời`}
-                      {phase === 'DrawerAnswering' && isMyTurn && '🎯 Đến lượt bạn!'}
-                      {phase === 'Stealing' && '⚡ Giành quyền!'}
-                      {phase === 'Revealing' && '✅ Đang xét...'}
+                )}
+                {phase === 'DrawerAnswering' && spunNumber && (
+                  <div className="flex items-center gap-4">
+                    <div className="w-16 h-16 bg-red-500 text-white rounded-xl flex items-center justify-center font-black text-3xl shadow">
+                      {spunNumber}
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs text-gray-500 mb-0.5">Số vừa quay</div>
+                      {!currentDrawerId && (
+                        <div className="font-bold text-orange-600">⏳ Quản trò chọn người trả lời...</div>
+                      )}
+                      {currentDrawerId === session.playerId && (
+                        <div className="font-bold text-red-600 animate-pulse">
+                          🎯 Đến lượt bạn! Đọc đáp án cho quản trò biết
+                        </div>
+                      )}
+                      {currentDrawerId && currentDrawerId !== session.playerId && (
+                        <div className="font-semibold text-gray-700">
+                          <span className="text-red-500">{currentDrawer?.name}</span> đang trả lời...
+                        </div>
+                      )}
                     </div>
                   </div>
-                  {remaining > 0 && (phase === 'DrawerAnswering' || phase === 'Stealing') && (
-                    <div className={`ml-auto text-2xl font-black ${remaining <= 5 ? 'text-red-500' : 'text-gray-400'}`}>
-                      {remaining}s
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {phase === 'Idle' && (
-                <div className="bg-white rounded-xl shadow p-6 text-center text-gray-500">
-                  <div className="text-3xl mb-2">⏳</div>
-                  <p className="font-medium">Đợi quản trò quay số...</p>
-                </div>
-              )}
-
-              {activeQuestion && (
-                <QuestionPanel
-                  question={activeQuestion.question}
-                  remaining={remaining}
-                  onAnswer={handleAnswer}
-                  disabled={hasAnswered || qMode === 'readonly'}
-                  mode={qMode}
-                />
-              )}
+                )}
+                {phase === 'Revealing' && (
+                  <div className="text-center text-gray-500">
+                    <div className="text-2xl mb-1">✅</div>
+                    <p className="font-medium text-sm">Đang xét kết quả...</p>
+                  </div>
+                )}
+              </div>
 
               {myCard && (
                 <div className="flex gap-3 items-start">

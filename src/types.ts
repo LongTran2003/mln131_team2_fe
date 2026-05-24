@@ -1,6 +1,6 @@
 // Enums
 export type RoomState = 'Lobby' | 'Picking' | 'Playing' | 'Ended';
-export type GamePhase = 'Idle' | 'DrawerAnswering' | 'Stealing' | 'Revealing';
+export type GamePhase = 'Idle' | 'DrawerAnswering' | 'Revealing';
 export type WinType = 'Row' | 'Column';
 
 // Room
@@ -26,7 +26,6 @@ export interface CardDto {
   id: string; grid: number[][]; ownerId: string | null; isAvailable: boolean;
 }
 
-// Question (KHÔNG có correctIndex)
 export interface QuestionDto {
   id: string; text: string; options: string[]; type: 'Normal' | 'Redemption';
 }
@@ -46,11 +45,12 @@ export interface GameStateDto {
   currentSpunNumber: number | null;
 }
 
-export interface SpinWheelRequest { hostId: string }
 export interface SpinWheelResponse {
   spunNumber: number; question: QuestionDto;
-  firstAnswererId: string; deadline: string;
 }
+
+export interface SelectAnswererRequest { hostId: string; playerId: string }
+export interface SkipSlotRequest { hostId: string }
 
 export interface SubmitAnswerRequest { playerId: string; answerIndex: number }
 export interface SubmitAnswerResponse {

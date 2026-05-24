@@ -3,7 +3,11 @@
     "allow": [
       "Bash(Get-ChildItem -Path \"D:\\\\SCHOOL\\\\Sem9\\\\MLN131\\\\MLN131_BE\\\\Loto_FE\" -Force)",
       "Bash(Select-Object Mode, Name)",
-      "Read(//d/SCHOOL/Sem9/MLN131/MLN131_BE/Loto_BE/**)"
+      "Read(//d/SCHOOL/Sem9/MLN131/MLN131_BE/Loto_BE/**)",
+      "Bash(rm \"D:/SCHOOL/Sem9/MLN131/MLN131_BE/Loto_BE/LotoMln.API/BackgroundServices/StealResolverHostedService.cs\")"
+    ],
+    "additionalDirectories": [
+      "D:\\SCHOOL\\Sem9\\MLN131\\MLN131_BE\\Loto_BE\\LotoMln.API\\BackgroundServices"
     ]
   }
 }

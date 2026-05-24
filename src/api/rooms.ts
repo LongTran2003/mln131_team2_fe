@@ -40,11 +40,14 @@ export const roomsApi = {
   spinWheel: (code: string, hostId: string) =>
     api.post<SpinWheelResponse>(`/Rooms/${code}/game/spin-wheel`, { hostId }).then(r => r.data),
 
+  selectAnswerer: (code: string, hostId: string, playerId: string) =>
+    api.post(`/Rooms/${code}/game/select-answerer`, { hostId, playerId }).then(r => r.data),
+
   submitAnswer: (code: string, playerId: string, answerIndex: number) =>
     api.post(`/Rooms/${code}/game/submit-answer`, { playerId, answerIndex }).then(r => r.data),
 
-  stealAttempt: (code: string, playerId: string, answerIndex: number) =>
-    api.post(`/Rooms/${code}/game/steal`, { playerId, answerIndex }).then(r => r.data),
+  skipSlot: (code: string, hostId: string) =>
+    api.post(`/Rooms/${code}/game/skip-slot`, { hostId }).then(r => r.data),
 
   claimKinh: (code: string, playerId: string) =>
     api.post<KinhVerifyResult>(`/Rooms/${code}/game/claim-kinh`, { playerId }).then(r => r.data),
