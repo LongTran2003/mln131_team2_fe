@@ -45,16 +45,23 @@ export function CardPreview({ card, onClick, selected, size = 'md' }: Props) {
         <span className="font-mono text-xs font-bold text-gray-700">{theme.label}</span>
       </div>
 
-      {/* 5x5 grid */}
-      <div className="grid grid-cols-5 gap-0.5">
-        {card.grid.flat().map((n, i) => (
-          <div
-            key={i}
-            className={`aspect-square flex items-center justify-center bg-white rounded ${numSize[size]} font-mono font-medium text-gray-800 shadow-sm`}
-          >
-            {n}
-          </div>
-        ))}
+      {/* 4x4 grid với ô đục lỗ (n=0 = lỗ) */}
+      <div className="grid grid-cols-4 gap-0.5">
+        {card.grid.flat().map((n, i) =>
+          n === 0 ? (
+            <div
+              key={i}
+              className="aspect-square bg-gray-100 border border-dashed border-gray-300 rounded"
+            />
+          ) : (
+            <div
+              key={i}
+              className={`aspect-square flex items-center justify-center bg-white rounded ${numSize[size]} font-mono font-medium text-gray-800 shadow-sm`}
+            >
+              {n}
+            </div>
+          )
+        )}
       </div>
     </button>
   );
